@@ -8,7 +8,7 @@ from transformers import (
 
 from utils.preprocessing import preprocess_text
 
-MODEL_PATH = "model/best_model_final"
+MODEL_PATH = "twfebiana/absa-indobert-lp"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
