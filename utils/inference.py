@@ -1,111 +1,115 @@
-# utils/inference.py
 import json
 import torch
-import pandas as pd
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from utils.preprocessing import preprocess_for_inference
 
-MODEL_NAME = "twfebiana/indobert-powerset-model"
-MODEL_SUBFOLDER = "model/best_model_final"
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification
+)
+
+from utils.preprocessing import preprocess_text
+
+MODEL_PATH = "model/best_model_final"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 tokenizer = None
 model = None
 
-with open("utils/label_maps.json", "r", encoding="utf-8") as f:
+with open("utils/label_maps.json", "r") as f:
     maps = json.load(f)
 
-label2id = maps.get("label2id", {})
-id2label = {int(k): v for k, v in maps.get("id2label", {}).items()}
-binary_map = maps.get("binary_map", {})
+id2label = {
+    int(k): v
+    for k, v in maps["id2label"].items()
+}
+
+binary_map = maps["binary_map"]
+
+
+# LOAD MODEL
 
 def load_model():
-    global tokenizer, model
+
+    global tokenizer
+    global model
 
     if tokenizer is None or model is None:
-        tokenizer = AutoTokenizer.from_pretrained(
-            MODEL_NAME,
-            subfolder=MODEL_SUBFOLDER
-        )
+
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+
         model = AutoModelForSequenceClassification.from_pretrained(
-            MODEL_NAME,
-            subfolder=MODEL_SUBFOLDER
+            MODEL_PATH
         )
+
         model.to(DEVICE)
         model.eval()
 
-def decode_binary_combo(class_name):
-    return binary_map.get(class_name, None)
 
-def map_binary_to_aspects(binary_string):
-    aspects = {}
-    if binary_string is None:
-        return aspects
+# MAP ASPEK
 
-    keys = ["kpms_pos","kpms_neg","fi_pos","fi_neg","wt_pos","wt_neg","bl_pos","bl_neg"]
-    for k, bit in zip(keys, list(binary_string)):
-        aspects[k] = int(bit)
+def map_aspects(binary):
 
-    aspect_summary = {}
-    for a in ["kpms","fi","wt","bl"]:
-        pos = aspects.get(f"{a}_pos", 0)
-        neg = aspects.get(f"{a}_neg", 0)
-        if pos == 1 and neg == 0:
-            aspect_summary[a] = 1
-        elif neg == 1 and pos == 0:
-            aspect_summary[a] = -1
-        else:
-            aspect_summary[a] = 0
-    return aspect_summary
+    keys = [
+        "kpms_pos",
+        "kpms_neg",
+        "fi_pos",
+        "fi_neg",
+        "wt_pos",
+        "wt_neg",
+        "bl_pos",
+        "bl_neg"
+    ]
+
+    result = {}
+
+    for k, b in zip(keys, binary):
+        result[k] = int(b)
+
+    return result
+
+
+# PREDIKSI
 
 def predict_single(text):
+
     load_model()
 
-    clean = preprocess_for_inference(text)
+    prep = preprocess_text(text)
+
+    final_text = prep["final_text"]
+
     enc = tokenizer(
-        clean,
+        final_text,
         return_tensors="pt",
         truncation=True,
         padding=True,
         max_length=128
     )
-    enc = {k: v.to(DEVICE) for k, v in enc.items()}
 
-    with torch.no_grad():
-        logits = model(**enc).logits
-        pred_id = int(torch.argmax(logits, dim=1).cpu().numpy()[0])
-
-    class_name = id2label.get(pred_id, str(pred_id))
-    binary = decode_binary_combo(class_name)
-    aspects = map_binary_to_aspects(binary)
-    probs = torch.softmax(logits, dim=1).cpu().numpy()[0].tolist()
-
-    return {
-        "clean_text": clean,
-        "class": class_name,
-        "binary": binary,
-        "aspects": aspects,
-        "probs": probs,
-        "pred_id": pred_id
+    enc = {
+        k: v.to(DEVICE)
+        for k, v in enc.items()
     }
 
-def predict_batch_dataframe(df, text_col="ulasan"):
-    load_model()
+    with torch.no_grad():
 
-    results = []
-    for t in df[text_col].astype(str).tolist():
-        res = predict_single(t)
-        flat = {
-            "ulasan": t,
-            "clean_text": res["clean_text"],
-            "pred_class": res["class"],
-            "pred_binary": res["binary"],
-            "pred_id": res["pred_id"],
-            "probs": res["probs"]
-        }
-        for k, v in res["aspects"].items():
-            flat[f"aspect_{k}"] = v
-        results.append(flat)
+        logits = model(**enc).logits
 
-    return pd.DataFrame(results)
+        pred_id = int(
+            torch.argmax(logits, dim=1)
+            .cpu()
+            .numpy()[0]
+        )
+
+    pred_class = id2label[pred_id]
+
+    binary = binary_map[pred_class]
+
+    aspects = map_aspects(binary)
+
+    return {
+        "preprocessing": prep,
+        "class": pred_class,
+        "binary": binary,
+        "aspects": aspects
+    }
