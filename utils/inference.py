@@ -8,7 +8,7 @@ from transformers import (
 
 from utils.preprocessing import preprocess_text
 
-MODEL_PATH = "twfebiana/absa-indobert-lp"
+MODEL_NAME = "twfebiana/absa-indobert-lp"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -35,15 +35,18 @@ def load_model():
 
     if tokenizer is None or model is None:
 
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+        tokenizer = AutoTokenizer.from_pretrained(
+            MODEL_NAME,
+            subfolder="model/best_model_final"
+        )
 
         model = AutoModelForSequenceClassification.from_pretrained(
-            MODEL_PATH
+            MODEL_NAME,
+            subfolder="model/best_model_final"
         )
 
         model.to(DEVICE)
         model.eval()
-
 
 # MAP ASPEK
 
